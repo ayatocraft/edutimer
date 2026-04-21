@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Nexis EduTimer</title>
+<style>
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: #0f172a;
+  color: white;
+  text-align: center;
+}
+
+#setup {
+  padding: 20px;
+}
+
+#timer {
+  display: none;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.big {
+  font-size: 64px;
+  font-weight: bold;
+}
+
+.red {
+  color: #ff4d4d;
+}
+
+.small {
+  font-size: 20px;
+  opacity: 0.8;
+}
+
+button {
+  padding: 10px 20px;
+  margin: 5px;
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: white;
+}
+
+input {
+  padding: 5px;
+  margin: 5px;
+}
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>Nexis EduTimer 設定</h1>
+
+  <p>何時間目まで <input id="periods" type="number" value="6"></p>
+  <p>1コマ（分） <input id="lesson" type="number" value="45"></p>
+  <p>準備時間（分） <input id="prep" type="number" value="5"></p>
+
+  <h3>イベント追加</h3>
+  <div id="events"></div>
+  <button onclick="addEvent()">＋イベント</button>
+
+  <br><br>
+  <button onclick="start()">開始</button>
+
+  <h3>操作方法</h3>
+  <p>
+  ・画面タップ：次へ進む（強制切替）<br>
+  ・遅れは自動で計算されます<br>
+  ・時間は実際の進行に合わせて追従します
+  </p>
+</div>
+
+<div id="timer" onclick="next()">
+  <div id="remaining" class="big">--:--</div>
+  <div id="next" class="small">次：--</div>
+  <div id="clock" class="small"></div>
+</div>
+
+<script>
+let schedule = [];
+let currentIndex = 0;
+let startTime = 0;
+
+function addEvent() {
+  const div = document.createElement("div");
+  div.innerHTML = `
+    種類:
+    <select>
+      <option>給食</option>
+      <option>朝の会</option>
+      <option>朝活</option>
+      <option>帰りの会</option>
+      <option>掃除</option>
+      <option>休憩</option>
+    </select>
+    何限のあと:
+    <input type="text" placeholder="例:4 or last">
+    分:
+    <input type="number" value="30">
+  `;
+  document.getElementById("events").appendChild(div);
+}
+
+function buildSchedule(config) {
+  let result = [];
+  let time = Date.now();
+
+  function push(name, duration, expectedStart) {
+    result.push({
+      name,
+      duration: duration * 60000,
+      expectedStart,
+      expectedEnd: expectedStart + duration * 60000,
+      actualStart: time,
+      actualEnd: null
+    });
+    time += duration * 60000;
+  }
+
+  let expectedTime = Date.now();
+
+  // 朝系（after=0）
+  config.events.filter(e => e.after == 0).forEach(e => {
+    push(e.type, e.duration, expectedTime);
+    expectedTime += e.duration * 60000;
+  });
+
+  for (let i = 1; i <= config.periods; i++) {
+    push(i + "限目", config.lesson, expectedTime);
+    expectedTime += config.lesson * 60000;
+
+    push("準備時間", config.prep, expectedTime);
+    expectedTime += config.prep * 60000;
+
+    config.events.filter(e => e.after == i).forEach(e => {
+      push(e.type, e.duration, expectedTime);
+      expectedTime += e.duration * 60000;
+    });
+  }
+
+  // last
+  config.events.filter(e => e.after === "last").forEach(e => {
+    push(e.type, e.duration, expectedTime);
+    expectedTime += e.duration * 60000;
+  });
+
+  return result;
+}
+
+function start() {
+  const config = {
+    periods: Number(periods.value),
+    lesson: Number(lesson.value),
+    prep: Number(prep.value),
+    events: []
+  };
+
+  document.querySelectorAll("#events > div").forEach(div => {
+    const sel = div.querySelector("select").value;
+    const after = div.querySelectorAll("input")[0].value;
+    const dur = Number(div.querySelectorAll("input")[1].value);
+
+    config.events.push({
+      type: sel,
+      after: after === "last" ? "last" : Number(after),
+      duration: dur
+    });
+  });
+
+  localStorage.setItem("eduConfig", JSON.stringify(config));
+
+  schedule = buildSchedule(config);
+  currentIndex = 0;
+  schedule[0].actualStart = Date.now();
+
+  document.getElementById("setup").style.display = "none";
+  document.getElementById("timer").style.display = "flex";
+
+  setInterval(update, 1000);
+}
+
+function update() {
+  const now = Date.now();
+  const current = schedule[currentIndex];
+
+  let end = current.actualStart + current.duration;
+  let remaining = end - now;
+
+  if (remaining <= 0) {
+    next();
+    return;
+  }
+
+  const expectedEnd = current.expectedEnd;
+  const delay = now - expectedEnd;
+
+  let text = format(remaining);
+
+  const el = document.getElementById("remaining");
+  el.textContent = "あと " + text;
+
+  if (delay > 0) {
+    el.classList.add("red");
+  } else {
+    el.classList.remove("red");
+  }
+
+  document.getElementById("next").textContent =
+    "次：" + (schedule[currentIndex + 1]?.name || "終了");
+
+  const nowDate = new Date();
+  document.getElementById("clock").textContent =
+    nowDate.toLocaleTimeString();
+}
+
+function next() {
+  const now = Date.now();
+  schedule[currentIndex].actualEnd = now;
+
+  currentIndex++;
+  if (currentIndex >= schedule.length) return;
+
+  schedule[currentIndex].actualStart = now;
+}
+
+function format(ms) {
+  let s = Math.floor(ms / 1000);
+  let m = Math.floor(s / 60);
+  s %= 60;
+  return `${m}分${s}秒`;
+}
+
+// 自動読み込み
+const saved = localStorage.getItem("eduConfig");
+if (saved) {
+  const cfg = JSON.parse(saved);
+  periods.value = cfg.periods;
+  lesson.value = cfg.lesson;
+  prep.value = cfg.prep;
+}
+</script>
+
+</body>
+</html>
