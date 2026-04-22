@@ -2,287 +2,117 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Nexis EduTimer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EduTime 認証</title>
+
 <style>
-body{
-  margin:0;
-  font-family:sans-serif;
-  background:#0f172a;
-  color:white;
-  text-align:center;
+body {
+    font-family: sans-serif;
+    background: #0f172a;
+    color: white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
 }
 
-/* 設定画面 */
-#setup{padding:20px}
-
-/* タイマー画面 */
-#timer{
-  display:none;
-  height:100vh;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
+.container {
+    background: #1e293b;
+    padding: 30px;
+    border-radius: 16px;
+    text-align: center;
+    width: 320px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 
-.current{
-  font-size:28px;
-  margin-bottom:10px;
+h1 {
+    font-size: 20px;
+    margin-bottom: 10px;
 }
 
-.big{
-  font-size:64px;
-  font-weight:bold;
+p {
+    font-size: 13px;
+    color: #94a3b8;
 }
 
-.red{color:#ff4d4d}
-
-.small{
-  font-size:20px;
-  opacity:0.8;
+input {
+    width: 100%;
+    padding: 12px;
+    margin-top: 15px;
+    border-radius: 8px;
+    border: none;
+    outline: none;
+    font-size: 16px;
 }
 
-input,select{
-  margin:5px;
-  padding:5px;
+button {
+    margin-top: 15px;
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #3b82f6;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
 }
 
-button{
-  padding:10px 20px;
-  border:none;
-  border-radius:10px;
-  background:#2563eb;
-  color:white;
-  margin:5px;
-  cursor:pointer;
-}
-
-.eventBox{
-  margin:10px;
-  padding:10px;
-  border:1px solid #334155;
-  border-radius:10px;
+button:hover {
+    background: #2563eb;
 }
 </style>
 </head>
+
 <body>
 
-<!-- 設定 -->
-<div id="setup">
-  <h1>学校タイマー設定</h1>
+<div class="container">
+    <h1>EduTime</h1>
+    <p>学校のために作られたタイムマネジメントタイマー</p>
 
-  <p>1日は何時間目まで？ <input id="periods" type="number" value="6"></p>
-  <p>1コマの長さ（分） <input id="lesson" type="number" value="45"></p>
-  <p>授業のあいだの準備時間（分） <input id="prep" type="number" value="5"></p>
-
-  <h3>イベント（給食・掃除など）</h3>
-  <div id="events"></div>
-  <button onclick="addEvent()">＋イベントを追加</button>
-
-  <br><br>
-  <button onclick="start()">スタート</button>
-
-  <h3>使い方</h3>
-  <p>
-  ・画面をタップすると次に進みます<br>
-  ・少し遅れると赤く表示されます<br>
-  ・「start」= 最初に入れる<br>
-  ・「last」= 一番最後に入れる<br>
-  ・「4」= 4限のあと<br>
-  ・「給食」など名前でもOK（そのあとに入る）
-  </p>
-</div>
-
-<!-- タイマー -->
-<div id="timer" onclick="next()">
-  <div id="current" class="current">--</div>
-  <div id="remaining" class="big">--:--</div>
-  <div id="nextText" class="small">次：--</div>
-  <div id="clock" class="small"></div>
+    <input id="code" placeholder="プロダクトコード">
+    <button onclick="submitCode()">認証</button>
 </div>
 
 <script>
-let schedule = [];
-let currentIndex = 0;
+// SHA-256（正しいコードのハッシュ）
+const VALID_HASH = "1c8fc605dc01bac1a14c52e66bee5e873afafa35282b41f60315a246d0cf5f68"; 
+// ↑ "edutime" のSHA-256（固定）
 
-/* イベント追加 */
-function addEvent(data={}){
-  const div=document.createElement("div");
-  div.className="eventBox";
-
-  div.innerHTML=`
-    種類：
-    <select>
-      <option ${data.type==="給食"?"selected":""}>給食</option>
-      <option ${data.type==="朝の会"?"selected":""}>朝の会</option>
-      <option ${data.type==="朝活"?"selected":""}>朝活</option>
-      <option ${data.type==="帰りの会"?"selected":""}>帰りの会</option>
-      <option ${data.type==="掃除"?"selected":""}>掃除</option>
-      <option ${data.type==="休憩"?"selected":""}>休憩</option>
-    </select>
-    <br>
-    どこのあと？：
-    <input placeholder="例：start / 4 / 給食 / last" value="${data.after||""}">
-    <br>
-    何分？：
-    <input type="number" value="${data.duration||30}">
-    <br>
-    <button onclick="this.parentElement.remove();saveEvents()">削除</button>
-  `;
-
-  div.querySelectorAll("input,select").forEach(el=>{
-    el.onchange=saveEvents;
-  });
-
-  events.appendChild(div);
-  saveEvents();
-}
-
-/* イベント保存 */
-function saveEvents(){
-  let list=[];
-  document.querySelectorAll("#events .eventBox").forEach(div=>{
-    list.push({
-      type:div.querySelector("select").value,
-      after:div.querySelectorAll("input")[0].value,
-      duration:+div.querySelectorAll("input")[1].value
-    });
-  });
-  localStorage.setItem("eduEvents",JSON.stringify(list));
-}
-
-/* イベント読み込み */
-function loadEvents(){
-  const saved=localStorage.getItem("eduEvents");
-  if(saved){
-    JSON.parse(saved).forEach(e=>addEvent(e));
-  }
-}
-
-/* スケジュール生成 */
-function buildSchedule(config){
-  let base=[];
-
-  for(let i=1;i<=config.periods;i++){
-    base.push({name:i+"限目",duration:config.lesson});
-    base.push({name:"準備時間",duration:config.prep});
-  }
-
-  config.events.forEach(ev=>{
-    if(ev.after==="start"){
-      base.unshift({name:ev.type,duration:ev.duration});
-      return;
+// 初回チェック
+window.onload = () => {
+    if (localStorage.getItem("auth") === "ok") {
+        location.href = "time.html";
     }
-    if(ev.after==="last"){
-      base.push({name:ev.type,duration:ev.duration});
-      return;
+};
+
+// SHA-256生成
+async function sha256(text) {
+    const enc = new TextEncoder().encode(text);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+}
+
+// 入力処理
+async function submitCode() {
+    const code = document.getElementById("code").value.trim().toLowerCase();
+
+    if (!code) {
+        alert("コードを入力してください");
+        return;
     }
 
-    let idx=base.findIndex(x=>x.name.includes(ev.after));
-    if(idx!==-1){
-      base.splice(idx+1,0,{name:ev.type,duration:ev.duration});
+    const hash = await sha256(code);
+
+    if (hash === VALID_HASH) {
+        localStorage.setItem("auth", "ok");
+        location.href = "time.html";
+    } else {
+        alert("コードが正しくありません");
     }
-  });
-
-  let now=Date.now();
-  let expected=now;
-
-  return base.map(item=>{
-    let obj={
-      name:item.name,
-      duration:item.duration*60000,
-      expectedStart:expected,
-      expectedEnd:expected+item.duration*60000,
-      actualStart:now,
-      actualEnd:null
-    };
-    expected+=item.duration*60000;
-    now+=item.duration*60000;
-    return obj;
-  });
 }
-
-/* 開始 */
-function start(){
-  const config={
-    periods:+periods.value,
-    lesson:+lesson.value,
-    prep:+prep.value,
-    events:JSON.parse(localStorage.getItem("eduEvents")||"[]")
-  };
-
-  localStorage.setItem("eduConfig",JSON.stringify(config));
-
-  schedule=buildSchedule(config);
-  currentIndex=0;
-  schedule[0].actualStart=Date.now();
-
-  setup.style.display="none";
-  timer.style.display="flex";
-
-  setInterval(update,1000);
-}
-
-/* 更新 */
-function update(){
-  if(currentIndex>=schedule.length)return;
-
-  const now=Date.now();
-  const cur=schedule[currentIndex];
-
-  let end=cur.actualStart+cur.duration;
-  let remain=end-now;
-
-  if(remain<=0){
-    next();
-    return;
-  }
-
-  current.textContent=cur.name;
-  remaining.textContent="あと "+format(remain);
-
-  let delay=now-cur.expectedEnd;
-  if(delay>0){
-    remaining.classList.add("red");
-  }else{
-    remaining.classList.remove("red");
-  }
-
-  nextText.textContent="次："+(schedule[currentIndex+1]?.name||"終了");
-  clock.textContent=new Date().toLocaleTimeString();
-}
-
-/* 次へ */
-function next(){
-  if(currentIndex>=schedule.length)return;
-
-  let now=Date.now();
-  schedule[currentIndex].actualEnd=now;
-
-  currentIndex++;
-  if(currentIndex>=schedule.length)return;
-
-  schedule[currentIndex].actualStart=now;
-}
-
-/* 時間フォーマット */
-function format(ms){
-  let s=Math.floor(ms/1000);
-  let m=Math.floor(s/60);
-  s%=60;
-  return m+"分"+s+"秒";
-}
-
-/* 設定読み込み */
-const saved=localStorage.getItem("eduConfig");
-if(saved){
-  const cfg=JSON.parse(saved);
-  periods.value=cfg.periods;
-  lesson.value=cfg.lesson;
-  prep.value=cfg.prep;
-}
-
-loadEvents();
 </script>
 
 </body>
