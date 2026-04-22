@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<script type="module" src="https://unpkg.com/@fluentui/web-components"></script>
+
+<style>
+body{
+  margin:0;
+  font-family:Segoe UI;
+  background:#1f1f1f;
+  color:white;
+  display:flex;
+  height:100vh;
+}
+
+.left{flex:2;padding:12px;overflow:auto;}
+.right{flex:1;padding:12px;border-left:1px solid #444;}
+
+.item{
+  display:flex;
+  justify-content:space-between;
+  padding:10px;
+  margin:5px 0;
+  border-radius:6px;
+  cursor:grab;
+  background:#2b2b2b;
+}
+.default{border-left:4px solid #3b82f6;}
+.custom{border-left:4px solid #f59e0b;}
+
+.delete{cursor:pointer;opacity:0.6;}
+.delete:hover{opacity:1;}
+
+#timer,#endScreen{
+  display:none;
+  width:100%;
+  height:100vh;
+  justify-content:center;
+  align-items:center;
+  flex-direction:column;
+  text-align:center;
+}
+
+.big{font-size:60px;}
+.red{color:#ff4d4d;}
+</style>
+</head>
+
+<body>
+
+<div id="setup" style="display:flex;width:100%">
+<div class="left">
+<h3>時間割</h3>
+<div id="list"></div>
+
+<p>
+■ 操作方法<br>
+・ドラッグで並び替え<br>
+・🗑で削除<br>
+・右側で追加・設定
+</p>
+</div>
+
+<div class="right">
+
+<h4>基本設定</h4>
+<fluent-text-field id="periods" placeholder="授業数"></fluent-text-field>
+<fluent-text-field id="lesson" placeholder="1コマ（分）"></fluent-text-field>
+<fluent-text-field id="prep" placeholder="休憩（分）"></fluent-text-field>
+
+<fluent-button onclick="generateDefault()">時間割を作る</fluent-button>
+
+<h4>イベント追加</h4>
+<fluent-text-field id="name" placeholder="イベント名"></fluent-text-field>
+<fluent-text-field id="dur" placeholder="時間（分）"></fluent-text-field>
+
+<fluent-select id="after">
+  <fluent-option value="start">最初</fluent-option>
+</fluent-select>
+
+<fluent-button onclick="addEvent()">追加</fluent-button>
+
+<h4>保存</h4>
+<div id="status">保存されています</div>
+<fluent-button onclick="saveNow()">今すぐ保存</fluent-button>
+<fluent-button onclick="resetAll()">初期化</fluent-button>
+
+<fluent-button appearance="accent" onclick="startTimer()">タイマー開始</fluent-button>
+
+</div>
+</div>
+
+<div id="timer" onclick="nextStep()">
+<h2 id="current"></h2>
+<div id="remain" class="big"></div>
+<div id="nextText"></div>
+<div id="clock"></div>
+<p>クリックで次へ</p>
+</div>
+
+<div id="endScreen">
+<h1>本日の授業は終了しました！</h1>
+<p>お疲れ様でした。</p>
+<h3 id="summary"></h3>
+<fluent-button onclick="location.reload()">戻る</fluent-button>
+</div>
+
+<script>
+let totalDiff = 0; // +遅れ / -早まり
+let listData=[];
+let dirty=false;
+
+/* DOM取得（安全） */
+const el = id => document.getElementById(id);
+
+/* 初期ロード */
+function loadAll(){
+  try{
+    listData=JSON.parse(localStorage.getItem("listData")||"[]");
+    el("periods").value=localStorage.getItem("periods")||"";
+    el("lesson").value=localStorage.getItem("lesson")||"";
+    el("prep").value=localStorage.getItem("prep")||"";
+  }catch{
+    listData=[];
+  }
+}
+
+/* 保存 */
+function markDirty(){
+  dirty=true;
+  el("status").textContent="保存されていません";
+}
+function saveNow(){
+  try{
+    localStorage.setItem("listData",JSON.stringify(listData));
+    localStorage.setItem("periods",el("periods").value);
+    localStorage.setItem("lesson",el("lesson").value);
+    localStorage.setItem("prep",el("prep").value);
+    dirty=false;
+    el("status").textContent="保存されています";
+  }catch{
+    el("status").textContent="保存エラー";
+  }
+}
+
+/* 初期化 */
+function resetAll(){
+  if(confirm("すべてリセットしますか？")){
+    localStorage.clear();
+    location.reload();
+  }
+}
+
+/* デフォルト生成 */
+function generateDefault(){
+  let p=Number(el("periods").value)||6;
+  let l=Number(el("lesson").value)||45;
+  let pr=Number(el("prep").value)||5;
+
+  listData=[];
+  for(let i=1;i<=p;i++){
+    listData.push({name:i+"限目",dur:l,type:"default"});
+    if(i!==p){
+      listData.push({name:"休憩",dur:pr,type:"default"});
+    }
+  }
+  markDirty();
+  render();
+}
+
+/* 描画 */
+function render(){
+  const list=el("list");
+  list.innerHTML="";
+
+  listData.forEach((item,i)=>{
+    let div=document.createElement("div");
+    div.className="item "+item.type;
+
+    div.innerHTML=`
+      ${item.name} (${item.dur}分)
+      <span class="delete">🗑</span>
+    `;
+
+    div.draggable=true;
+    div.ondragstart=e=>e.dataTransfer.setData("i",i);
+    div.ondragover=e=>e.preventDefault();
+    div.ondrop=e=>{
+      let from=Number(e.dataTransfer.getData("i"));
+      let tmp=listData[from];
+      listData.splice(from,1);
+      listData.splice(i,0,tmp);
+      markDirty();render();
+    };
+
+    div.querySelector(".delete").onclick=()=>{
+      listData.splice(i,1);
+      markDirty();render();
+    };
+
+    list.appendChild(div);
+  });
+
+  updateSelect();
+}
+
+/* プルダウン更新 */
+function updateSelect(){
+  const after=el("after");
+  after.innerHTML='<fluent-option value="start">最初</fluent-option>';
+
+  listData.forEach((item,i)=>{
+    let opt=document.createElement("fluent-option");
+    opt.value=i;
+    opt.textContent=item.name+"のあと";
+    after.appendChild(opt);
+  });
+}
+
+/* イベント追加（完全修正） */
+function addEvent(){
+  const nameEl=el("name");
+  const durEl=el("dur");
+  const afterEl=el("after");
+
+  let n=(nameEl.value||"").trim();
+  let d=Number(durEl.value);
+
+  if(!n || !d){
+    alert("入力してください");
+    return;
+  }
+
+  let pos=afterEl.selectedOptions[0]?.value || "start";
+
+  let obj={name:n,dur:d,type:"custom"};
+
+  if(pos==="start"){
+    listData.unshift(obj);
+  }else{
+    listData.splice(Number(pos)+1,0,obj);
+  }
+
+  nameEl.value="";
+  durEl.value="";
+
+  markDirty();
+  render();
+}
+
+/* ===== タイマー ===== */
+let schedule=[],idx=0,lastDelayBeep=0,delayStarted=false,oneMinBeeped=false;
+
+function build(){
+  let now=Date.now();
+  schedule=listData.map(i=>{
+    let o={
+      name:i.name,
+      dur:i.dur*60000,
+      start:now,
+      end:now+i.dur*60000,
+      expectedEnd:now+i.dur*60000
+    };
+    now+=i.dur*60000;
+    return o;
+  });
+}
+
+function beep(){
+  try{
+    let ctx=new AudioContext();
+    let o=ctx.createOscillator();
+    o.connect(ctx.destination);
+    o.start();
+    setTimeout(()=>o.stop(),200);
+  }catch{}
+}
+
+function startTimer(){
+  if(listData.length===0) return alert("時間割を作成してください");
+  if(dirty) saveNow();
+
+  build();
+  el("setup").style.display="none";
+  el("timer").style.display="flex";
+
+  setInterval(update,1000);
+}
+
+function update(){
+  let now=Date.now();
+  let cur=schedule[idx];
+  if(!cur) return;
+
+  let r=cur.end-now;
+
+  el("current").textContent=cur.name;
+
+  if(r>0){
+    el("remain").textContent="あと "+format(r);
+    el("remain").classList.remove("red");
+
+    if(r<=60000 && !oneMinBeeped){
+      beep();
+      oneMinBeeped=true;
+    }
+
+  }else{
+    let delay=Math.abs(r);
+    el("remain").textContent="遅れ "+format(delay);
+    el("remain").classList.add("red");
+
+    if(!delayStarted){
+      beep();
+      delayStarted=true;
+      lastDelayBeep=now;
+    }
+
+    if(now-lastDelayBeep>=60000){
+      beep();
+      lastDelayBeep=now;
+    }
+  }
+
+  el("nextText").textContent="次："+(schedule[idx+1]?.name||"終了");
+  el("clock").textContent=new Date().toLocaleTimeString();
+}
+
+function nextStep(){
+  let now = Date.now();
+  let cur = schedule[idx];
+
+  if(cur){
+    let diff = now - cur.expectedEnd;
+    totalDiff += diff;
+  }
+
+  idx++;
+  delayStarted=false;
+  oneMinBeeped=false;
+
+  if(idx>=schedule.length){
+    showEnd();
+    return;
+  }
+
+  schedule[idx].start=Date.now();
+  schedule[idx].end=Date.now()+schedule[idx].dur;
+}
+function showEnd(){
+  document.getElementById("timer").style.display="none";
+  document.getElementById("endScreen").style.display="flex";
+
+  let text="";
+  if(totalDiff > 0){
+    text = format(totalDiff) + " 遅れ";
+  }else if(totalDiff < 0){
+    text = format(Math.abs(totalDiff)) + " 早く終了";
+  }else{
+    text = "ぴったり";
+  }
+
+  document.getElementById("summary").textContent = text;
+}
+function format(ms){
+  let s=Math.floor(ms/1000);
+  let m=Math.floor(s/60);
+  s%=60;
+  return m+"分"+s+"秒";
+}
+
+/* 初期化 */
+loadAll();
+render();
+</script>
+
+</body>
+</html>
