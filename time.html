@@ -3,77 +3,88 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EduTimer</title>
+
 <script type="module" src="https://unpkg.com/@fluentui/web-components"></script>
 
 <style>
 body{
   margin:0;
   font-family:Segoe UI;
-  background:#1f1f1f;
+  background:#1e1e1e;
   color:white;
-  display:flex;
-  height:100vh;
 }
-
-.left{flex:2;padding:12px;overflow:auto;}
-.right{flex:1;padding:12px;border-left:1px solid #444;}
-
+.container{
+  display:grid;
+  grid-template-columns:2fr 1fr;
+  gap:12px;
+  height:100vh;
+  padding:12px;
+  box-sizing:border-box;
+}
+.card{
+  background:#2a2a2a;
+  border-radius:12px;
+  padding:12px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.3);
+  
+   overflow:auto; /* ←これ追加 */
+}
+h3,h4{margin:6px 0 10px}
 .item{
   display:flex;
   justify-content:space-between;
   padding:10px;
-  margin:5px 0;
-  border-radius:6px;
+  margin:6px 0;
+  border-radius:8px;
   cursor:grab;
-  background:#2b2b2b;
+  background:#333;
+  user-select:none;
 }
-.default{border-left:4px solid #3b82f6;}
-.custom{border-left:4px solid #f59e0b;}
-
-.delete{cursor:pointer;opacity:0.6;}
-.delete:hover{opacity:1;}
-
+.default{border-left:4px solid #4da3ff;}
+.custom{border-left:4px solid #ffb84d;}
+.delete{cursor:pointer}
+fluent-text-field, fluent-select, fluent-button, fluent-switch{
+  margin-bottom:8px;
+  width:100%;
+}
 #timer,#endScreen{
   display:none;
-  width:100%;
   height:100vh;
   justify-content:center;
   align-items:center;
   flex-direction:column;
   text-align:center;
 }
-
-.big{font-size:60px;}
-.red{color:#ff4d4d;}
+.big{font-size:64px;}
+.red{color:#ff5c5c;}
 </style>
 </head>
 
 <body>
 
-<div id="setup" style="display:flex;width:100%">
-<div class="left">
+<div id="setup" class="container">
+
+<div class="card">
 <h3>時間割</h3>
 <div id="list"></div>
-
-<p>
-■ 操作方法<br>
-・ドラッグで並び替え<br>
-・🗑で削除<br>
-・右側で追加・設定
-</p>
+<p>ドラッグで並び替え / 🗑で削除</p>
 </div>
 
-<div class="right">
+<div class="card">
 
-<h4>基本設定</h4>
+<h4>① 基本設定</h4>
 <fluent-text-field id="periods" placeholder="授業数"></fluent-text-field>
 <fluent-text-field id="lesson" placeholder="1コマ（分）"></fluent-text-field>
 <fluent-text-field id="prep" placeholder="休憩（分）"></fluent-text-field>
 
+<!-- ▼ 追加 -->
+
+
 <fluent-button onclick="generateDefault()">時間割を作る</fluent-button>
 
-<h4>イベント追加</h4>
+<hr>
+
+<h4>② イベント追加</h4>
 <fluent-text-field id="name" placeholder="イベント名"></fluent-text-field>
 <fluent-text-field id="dur" placeholder="時間（分）"></fluent-text-field>
 
@@ -83,14 +94,18 @@ body{
 
 <fluent-button onclick="addEvent()">追加</fluent-button>
 
-<h4>保存</h4>
-<div id="status">保存されています</div>
-<fluent-button onclick="saveNow()">今すぐ保存</fluent-button>
+<hr>
+
+<h4>③ 保存・開始</h4>
+<div id="status">保存ボタンを押してください</div>
+
+<fluent-button onclick="saveNow()">保存</fluent-button>
 <fluent-button onclick="resetAll()">初期化</fluent-button>
 
 <fluent-button appearance="accent" onclick="startTimer()">タイマー開始</fluent-button>
 
 </div>
+
 </div>
 
 <div id="timer" onclick="nextStep()">
@@ -98,107 +113,147 @@ body{
 <div id="remain" class="big"></div>
 <div id="nextText"></div>
 <div id="clock"></div>
-<p>クリックで次へ</p>
+<p>授業やイベントが終わったらタップまたはクリックしてください</p>
 </div>
 
 <div id="endScreen">
 <h1>本日の授業は終了しました！</h1>
-<p>お疲れ様でした。</p>
-<h3 id="summary"></h3>
+<h2 id="summary"></h2>
 <fluent-button onclick="location.reload()">戻る</fluent-button>
 </div>
 
 <script>
-let totalDiff = 0; // +遅れ / -早まり
+const el=id=>document.getElementById(id);
+
+/* ===== 状態 ===== */
 let listData=[];
-let dirty=false;
+let schedule=[];
+let idx=0;
 
-/* DOM取得（安全） */
-const el = id => document.getElementById(id);
+let carry=0;
+let totalDiff=0;
 
-/* 初期ロード */
-function loadAll(){
-  try{
-    listData=JSON.parse(localStorage.getItem("listData")||"[]");
-    el("periods").value=localStorage.getItem("periods")||"";
-    el("lesson").value=localStorage.getItem("lesson")||"";
-    el("prep").value=localStorage.getItem("prep")||"";
-  }catch{
-    listData=[];
+let timerId=null;
+let dragIndex=null;
+
+let startRealTime=0;
+
+/* ===== デバッグ ===== */
+let speed=1;
+let debugOn=false;
+let LOG=true;
+
+function log(...a){
+  if(LOG) console.warn("[EduTimer]",...a);
+}
+
+function isTyping(){
+  const a=document.activeElement;
+  if(!a) return false;
+  const t=a.tagName;
+  return t==="INPUT"||t==="TEXTAREA"||t.includes("FLUENT");
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.key.toLowerCase()==="d"&&!isTyping()){
+    debugOn=!debugOn;
+    speed=debugOn?2:1;
+    log("DEBUG SPEED:",speed+"x");
   }
+});
+
+/* ===== チャイム ===== */
+let ctx;
+let delayStarted=false;
+let oneMinBeeped=false;
+let lastBeep=0;
+
+function beep(){
+  try{
+    if(!ctx) ctx=new AudioContext();
+    if(ctx.state==="suspended") ctx.resume();
+
+    [523,659,784,1046].forEach((f,i)=>{
+      let o=ctx.createOscillator(),g=ctx.createGain();
+      o.frequency.value=f;
+      o.type="triangle";
+      o.connect(g);g.connect(ctx.destination);
+      let t=ctx.currentTime+i*0.15;
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.4,t+0.01);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.4);
+      o.start(t);o.stop(t+0.5);
+    });
+  }catch(e){}
 }
 
-/* 保存 */
-function markDirty(){
-  dirty=true;
-  el("status").textContent="保存されていません";
-}
+/* ===== 保存 ===== */
 function saveNow(){
-  try{
-    localStorage.setItem("listData",JSON.stringify(listData));
-    localStorage.setItem("periods",el("periods").value);
-    localStorage.setItem("lesson",el("lesson").value);
-    localStorage.setItem("prep",el("prep").value);
-    dirty=false;
-    el("status").textContent="保存されています";
-  }catch{
-    el("status").textContent="保存エラー";
-  }
+  localStorage.setItem("listData",JSON.stringify(listData));
+  localStorage.setItem("periods",el("periods").value);
+  localStorage.setItem("lesson",el("lesson").value);
+  localStorage.setItem("prep",el("prep").value);
+  el("status").textContent="保存されています";
 }
 
-/* 初期化 */
-function resetAll(){
-  if(confirm("すべてリセットしますか？")){
-    localStorage.clear();
-    location.reload();
-  }
+function loadAll(){
+  listData=JSON.parse(localStorage.getItem("listData")||"[]");
+  el("periods").value=localStorage.getItem("periods")||"";
+  el("lesson").value=localStorage.getItem("lesson")||"";
+  el("prep").value=localStorage.getItem("prep")||"";
 }
 
-/* デフォルト生成 */
+/* ===== デフォルト生成 ===== */
 function generateDefault(){
   let p=Number(el("periods").value)||6;
   let l=Number(el("lesson").value)||45;
   let pr=Number(el("prep").value)||5;
 
   listData=[];
+
   for(let i=1;i<=p;i++){
-    listData.push({name:i+"限目",dur:l,type:"default"});
+    listData.push({name:i+"限目",dur:l,type:"lesson"});
     if(i!==p){
-      listData.push({name:"休憩",dur:pr,type:"default"});
+      listData.push({name:"休憩",dur:pr,type:"break"});
     }
   }
-  markDirty();
+
   render();
 }
 
-/* 描画 */
+/* ===== 描画 ===== */
 function render(){
-  const list=el("list");
+  let list=el("list");
   list.innerHTML="";
 
   listData.forEach((item,i)=>{
     let div=document.createElement("div");
-    div.className="item "+item.type;
 
-    div.innerHTML=`
-      ${item.name} (${item.dur}分)
-      <span class="delete">🗑</span>
-    `;
+    if(item.type==="lesson"){
+      div.className="item default";
+    }else if(item.type==="break"){
+      div.className="item";
+      div.style.borderLeft="4px solid #4dff88";
+    }else{
+      div.className="item custom";
+    }
 
+    div.innerHTML=`${item.name} (${item.dur}分) <span class="delete">🗑</span>`;
     div.draggable=true;
-    div.ondragstart=e=>e.dataTransfer.setData("i",i);
+
+    div.ondragstart=()=>dragIndex=i;
     div.ondragover=e=>e.preventDefault();
+
     div.ondrop=e=>{
-      let from=Number(e.dataTransfer.getData("i"));
-      let tmp=listData[from];
-      listData.splice(from,1);
-      listData.splice(i,0,tmp);
-      markDirty();render();
+      e.preventDefault();
+      let moved=listData.splice(dragIndex,1)[0];
+      listData.splice(i,0,moved);
+      render();
     };
 
     div.querySelector(".delete").onclick=()=>{
       listData.splice(i,1);
-      markDirty();render();
+      render();
     };
 
     list.appendChild(div);
@@ -207,9 +262,9 @@ function render(){
   updateSelect();
 }
 
-/* プルダウン更新 */
+/* ===== プルダウン ===== */
 function updateSelect(){
-  const after=el("after");
+  let after=el("after");
   after.innerHTML='<fluent-option value="start">最初</fluent-option>';
 
   listData.forEach((item,i)=>{
@@ -220,21 +275,13 @@ function updateSelect(){
   });
 }
 
-/* イベント追加（完全修正） */
+/* ===== 追加 ===== */
 function addEvent(){
-  const nameEl=el("name");
-  const durEl=el("dur");
-  const afterEl=el("after");
+  let n=(el("name").value||"").trim();
+  let d=Number(el("dur").value);
+  if(!n||!d)return alert("入力してください");
 
-  let n=(nameEl.value||"").trim();
-  let d=Number(durEl.value);
-
-  if(!n || !d){
-    alert("入力してください");
-    return;
-  }
-
-  let pos=afterEl.selectedOptions[0]?.value || "start";
+  let pos=el("after").value;
 
   let obj={name:n,dur:d,type:"custom"};
 
@@ -244,84 +291,110 @@ function addEvent(){
     listData.splice(Number(pos)+1,0,obj);
   }
 
-  nameEl.value="";
-  durEl.value="";
-
-  markDirty();
   render();
 }
 
-/* ===== タイマー ===== */
-let schedule=[],idx=0,lastDelayBeep=0,delayStarted=false,oneMinBeeped=false;
-
+/* ===== build（授業固定） ===== */
 function build(){
   let now=Date.now();
+
   schedule=listData.map(i=>{
-    let o={
+    let start=now;
+    let end=start+i.dur*60000;
+    now=end;
+
+    return {
       name:i.name,
-      dur:i.dur*60000,
-      start:now,
-      end:now+i.dur*60000,
-      expectedEnd:now+i.dur*60000
+      type:i.type,
+      baseDur:i.dur*60000,
+      actualDur:i.dur*60000,
+      start, // 固定
+      end    // 固定（授業は絶対触らない）
     };
-    now+=i.dur*60000;
-    return o;
   });
+
+  log("BUILD",schedule);
 }
 
-function beep(){
-  try{
-    let ctx=new AudioContext();
-    let o=ctx.createOscillator();
-    o.connect(ctx.destination);
-    o.start();
-    setTimeout(()=>o.stop(),200);
-  }catch{}
+/* ===== 仮想時間 ===== */
+function getNow(){
+  let real=Date.now();
+  return real+(real-startRealTime)*(speed-1);
 }
 
-function startTimer(){
-  if(listData.length===0) return alert("時間割を作成してください");
-  if(dirty) saveNow();
-
-  build();
-  el("setup").style.display="none";
-  el("timer").style.display="flex";
-
-  setInterval(update,1000);
-}
-
-function update(){
-  let now=Date.now();
+/* ===== 次へ ===== */
+function nextStep(){
+  let now=getNow();
   let cur=schedule[idx];
-  if(!cur) return;
 
-  let r=cur.end-now;
+  if(cur){
+    let diff=now-cur.end;
+
+    totalDiff+=diff;
+    carry+=diff;
+
+    log("STEP",{name:cur.name,diff,carry});
+
+    let next=schedule[idx+1];
+
+    if(next && next.type!=="lesson"){
+      let newDur=next.baseDur+carry;
+      if(newDur<0)newDur=0;
+
+      next.actualDur=newDur;
+      next.end=next.start+newDur;
+
+      log("ABSORB",{target:next.name,newDur});
+
+      carry=0;
+    }
+  }
+
+  idx++;
+
+  delayStarted=false;
+  oneMinBeeped=false;
+
+  if(idx>=schedule.length){
+    showEnd();
+  }
+}
+
+/* ===== 更新 ===== */
+function update(){
+  let now=getNow();
+  let cur=schedule[idx];
+  if(!cur)return;
+
+  let diff=now-cur.end;
+
+  if(LOG) console.warn("TICK",cur.name,diff);
 
   el("current").textContent=cur.name;
 
-  if(r>0){
-    el("remain").textContent="あと "+format(r);
+  if(diff<0){
+    let r=-diff;
+    el("remain").textContent="あと "+fmt(r);
     el("remain").classList.remove("red");
 
-    if(r<=60000 && !oneMinBeeped){
+    if(r<=60000&&!oneMinBeeped){
       beep();
       oneMinBeeped=true;
     }
 
   }else{
-    let delay=Math.abs(r);
-    el("remain").textContent="遅れ "+format(delay);
+    el("remain").textContent="遅れ "+fmt(diff);
     el("remain").classList.add("red");
 
     if(!delayStarted){
       beep();
       delayStarted=true;
-      lastDelayBeep=now;
+      lastBeep=now;
     }
 
-    if(now-lastDelayBeep>=60000){
+    if(now-lastBeep>=60000){
       beep();
-      lastDelayBeep=now;
+      lastBeep=now;
     }
   }
 
@@ -329,50 +402,55 @@ function update(){
   el("clock").textContent=new Date().toLocaleTimeString();
 }
 
-function nextStep(){
-  let now = Date.now();
-  let cur = schedule[idx];
+/* ===== 開始 ===== */
+function startTimer(){
+  if(timerId) clearInterval(timerId);
 
-  if(cur){
-    let diff = now - cur.expectedEnd;
-    totalDiff += diff;
-  }
+  idx=0;
+  carry=0;
+  totalDiff=0;
 
-  idx++;
-  delayStarted=false;
-  oneMinBeeped=false;
+  startRealTime=Date.now();
 
-  if(idx>=schedule.length){
-    showEnd();
-    return;
-  }
+  build();
 
-  schedule[idx].start=Date.now();
-  schedule[idx].end=Date.now()+schedule[idx].dur;
+  el("setup").style.display="none";
+  el("timer").style.display="flex";
+
+  timerId=setInterval(update,1000);
 }
+
+/* ===== 終了 ===== */
 function showEnd(){
-  document.getElementById("timer").style.display="none";
-  document.getElementById("endScreen").style.display="flex";
+  clearInterval(timerId);
+
+  el("timer").style.display="none";
+  el("endScreen").style.display="flex";
 
   let text="";
-  if(totalDiff > 0){
-    text = format(totalDiff) + " 遅れ";
-  }else if(totalDiff < 0){
-    text = format(Math.abs(totalDiff)) + " 早く終了";
+  if(totalDiff>0){
+    text=fmt(totalDiff)+" 遅れ";
+  }else if(totalDiff<0){
+    text=fmt(-totalDiff)+" 早く終了";
   }else{
-    text = "ぴったり";
+    text="ぴったり";
   }
 
-  document.getElementById("summary").textContent = text;
-}
-function format(ms){
-  let s=Math.floor(ms/1000);
-  let m=Math.floor(s/60);
-  s%=60;
-  return m+"分"+s+"秒";
+  el("summary").textContent=text;
 }
 
-/* 初期化 */
+/* ===== util ===== */
+function fmt(ms){
+  let s=Math.floor(ms/1000);
+  return Math.floor(s/60)+"分"+(s%60)+"秒";
+}
+
+function resetAll(){
+  localStorage.clear();
+  location.reload();
+}
+
+/* ===== 初期化 ===== */
 loadAll();
 render();
 </script>
