@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+  margin:0;
+  font-family:Segoe UI;
+  background:#1e1e1e;
+  color:white;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100%;
+}
+
+/* コンテナ */
+.box{
+  width:100%;
+  padding:10px;
+  box-sizing:border-box;
+}
+
+/* dB表示 */
+#dbText{
+  text-align:center;
+  font-size:20px;
+  margin-bottom:6px;
+}
+
+/* プログレスバー */
+.bar{
+  width:100%;
+  height:20px;
+  background:#444;
+  border-radius:10px;
+  overflow:hidden;
+}
+
+.fill{
+  height:100%;
+  width:0%;
+  background:#4dff88;
+  transition:width 0.3s linear, background 0.3s;
+}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+  <div id="dbText">-- dB</div>
+  <div class="bar">
+    <div id="fill" class="fill"></div>
+  </div>
+</div>
+
+<script>
+let audioCtx;
+let analyser;
+let dataArray;
+
+let lastUpdate=0;
+let lastBeep=0;
+let wasRed=false;
+
+/* ===== マイク取得 ===== */
+async function init(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+
+    audioCtx = new AudioContext();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    loop();
+  }catch(e){
+    alert("マイクが使えません");
+  }
+}
+
+/* ===== dB計算（簡易） ===== */
+function getDb(){
+  analyser.getByteTimeDomainData(dataArray);
+
+  let sum = 0;
+  for(let i=0;i<dataArray.length;i++){
+    let v = (dataArray[i]-128)/128;
+    sum += v*v;
+  }
+
+  let rms = Math.sqrt(sum/dataArray.length);
+
+  let db = 20 * Math.log10(rms);
+
+  db = db + 70; // 補正
+
+  if(db < 0) db = 0;
+  if(db > 130) db = 130;
+
+  return db;
+}
+
+/* ===== チャイム ===== */
+function beep(){
+  try{
+    const ctx = new AudioContext();
+
+    [523,659,784,1046].forEach((f,i)=>{
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+
+      o.type="triangle";
+      o.frequency.value=f;
+
+      o.connect(g);
+      g.connect(ctx.destination);
+
+      let t = ctx.currentTime + i*0.15;
+
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(0.4,t+0.01);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.4);
+
+      o.start(t);
+      o.stop(t+0.5);
+    });
+
+  }catch(e){}
+}
+
+/* ===== メインループ ===== */
+function loop(){
+  requestAnimationFrame(loop);
+
+  let now = Date.now();
+
+  // ★0.5秒ごと更新
+  if(now - lastUpdate < 500) return;
+  lastUpdate = now;
+
+  let db = getDb();
+
+  document.getElementById("dbText").textContent = db.toFixed(1)+" dB";
+
+  let percent = (db / 130) * 100;
+
+  let fill = document.getElementById("fill");
+  fill.style.width = percent + "%";
+
+  /* ===== 色分け ===== */
+  if(db < 55){
+    fill.style.background = "#4dff88"; // 緑
+    wasRed = false;
+  }
+  else if(db < 80){
+    fill.style.background = "#ffd24d"; // 黄
+    wasRed = false;
+  }
+  else{
+    fill.style.background = "#ff5c5c"; // 赤
+
+    // ★赤に入った瞬間だけ鳴らす
+    if(!wasRed){
+      beep();
+      wasRed = true;
+    }
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
