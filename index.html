@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Logo Sequence</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        overflow: hidden;
+        width: 100%;
+        height: 100%;
+    }
+
+    img {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        opacity: 0;
+        max-width: 80%;
+        transition: opacity 1.5s ease;
+    }
+
+    /* logo2だけ小さく＆ゆっくり */
+    #logo2 {
+        max-width: 40%;
+        transition: opacity 3s ease;
+    }
+
+    /* loadingは下に */
+    #loading {
+        top: 72%;
+        max-width: 120px;
+        transition: opacity 1s ease;
+    }
+
+    .show {
+        opacity: 1;
+    }
+
+    #startText {
+        position: absolute;
+        color: white;
+        font-size: 18px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        opacity: 0.6;
+        font-family: sans-serif;
+    }
+</style>
+</head>
+<body>
+
+<div id="startText">クリックで開始</div>
+
+<img id="logo1" src="logo1.png">
+<img id="logo2" src="logo2.png">
+<img id="logo3" src="logo3.png">
+<img id="loading" src="loading.gif">
+
+<audio id="audio1" src="fade.mp3"></audio>
+<audio id="audio2" src="fade2.mp3"></audio>
+
+<script>
+const logo1 = document.getElementById("logo1");
+const logo2 = document.getElementById("logo2");
+const logo3 = document.getElementById("logo3");
+const loading = document.getElementById("loading");
+
+const audio1 = document.getElementById("audio1");
+const audio2 = document.getElementById("audio2");
+
+const startText = document.getElementById("startText");
+
+// テンポ調整（ゆっくりめ）
+const displayTime = 3500;
+const fadeTime = 1500;
+
+// 音再生（安全）
+function playAudio(audio) {
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+}
+
+// 通常ロゴ処理
+function showLogo(logo, audio, customFade = fadeTime) {
+    return new Promise(resolve => {
+        playAudio(audio);
+        logo.classList.add("show");
+
+        setTimeout(() => {
+            logo.classList.remove("show");
+            setTimeout(resolve, customFade);
+        }, displayTime);
+    });
+}
+
+async function runSequence() {
+    startText.style.display = "none";
+
+    // logo1
+    await showLogo(logo1, audio1, 1500);
+
+    // logo2（ゆっくり＆小さい）
+    await showLogo(logo2, audio2, 3000);
+
+    // logo3（ここだけ特別）
+    playAudio(audio1);
+    logo3.classList.add("show");
+
+    // フェードイン完了後にloading表示
+    setTimeout(() => {
+        loading.classList.add("show");
+    }, 1500);
+
+    // 少し長めに見せる
+    setTimeout(() => {
+        window.location.href = "lock.html";
+    }, 5500);
+}
+
+// 音対策（クリック開始）
+document.body.addEventListener("click", runSequence, { once: true });
+</script>
+
+</body>
+</html>
